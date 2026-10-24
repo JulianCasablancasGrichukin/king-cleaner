@@ -1,0 +1,23 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ title }} · KING CLEANER</title><link rel="stylesheet" href="{{ url_for('static',filename='style.css') }}"><script defer src="{{ url_for('static',filename='app.js') }}"></script></head><body>
+{% if user %}<aside class="sidebar"><a class="brand" href="/" aria-label="King Cleaner, inicio"><span class="logo">KC<span>✦</span></span><span>KING CLEANER<small>CONTROL E INVENTARIO</small></span></a><nav aria-label="Navegación principal">
+{% set is_clients = request.endpoint == 'catalog' and request.view_args.get('kind') == 'clientes' %}
+{% set groups = [
+ ('General', [('home','Inicio','⌂',('home',))]),
+ ('Gestión comercial', [('sales','Ventas','↗',('sales','new_sale','sale_detail')),('catalog','Clientes','♙',('catalog',))]),
+ ('Operaciones', [('inventory','Almacén e inventario','▦',('inventory','lot_detail','receive','catalog','adjustment')),('production','Producción','⚙',('production','production_new')),('trace','Trazabilidad','⌕',('trace',))]),
+ ('Seguimiento', [('alerts','Alertas','♧',('alerts',)),('planner','Calendario','▤',('planner','event')),('reports','Reportes','▥',('reports',))]),
+ ('Administración', [('settings','Configuración','⚒',('settings',))])
+] %}
+{% for group, links in groups %}
+<div class="nav-caption">{{ group }}</div>
+{% for endpoint,label,icon,related in links %}
+{% set active = is_clients if endpoint == 'catalog' else request.endpoint in related and not (endpoint == 'inventory' and is_clients) %}
+<a href="{{ url_for('catalog',kind='clientes') if endpoint == 'catalog' else url_for(endpoint) }}" class="{{ 'active' if active else '' }}"{% if active %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">{{icon}}</span>{{label}}{% if active %}<b class="nav-dot" aria-hidden="true">•</b>{% endif %}</a>
+{% if endpoint == 'sales' and active %}<div class="subnav"><a href="/ventas?modo=diario">Diario</a><a href="/ventas?modo=mensual">Mensual</a><a href="/ventas?modo=anual">Anual</a></div>{% endif %}
+{% if endpoint == 'inventory' and active %}<div class="subnav"><a href="/inventario">Almacén y lotes</a><a href="/inventario?sector=GRANEL">A granel</a><a href="/inventario?sector=UNIDADES">Por unidad</a></div>{% endif %}
+{% endfor %}
+{% endfor %}</nav>
+<div class="sidebar-bottom"><div class="sidebar-note">Cada producto cuenta.<br><strong>Cada detalle también.</strong><span>✧</span></div><div class="profile"><span class="avatar">{{ user.fullname[0]|upper }}</span><div>{{user.fullname}}<small>{{user.role}}</small></div></div><form method="post" action="/salir"><input type="hidden" name="csrf" value="{{csrf}}"><button class="logout">↪ Cerrar sesión</button></form></div></aside>{% endif %}
+<div class="{{ 'shell' if user else 'public-shell' }}">{% if user %}<header class="topbar"><span class="breadcrumb">King Cleaner <span>/</span> {{title}}</span><div><span class="connection">● Entorno local</span><time>{{clock.strftime('%d/%m/%Y')}} <span>{{clock.strftime('%H:%M')}}</span></time></div></header>{% endif %}<main id="content">
+{% for category,message in get_flashed_messages(with_categories=true) %}<div role="status" class="notice {{category}}">{{message}}</div>{% endfor %}
+{% block content %}{% endblock %}</main>{% if user %}<footer><span>KING CLEANER <span>·</span> Control para crecer</span><span>Python + MySQL · Hora de Bolivia</span></footer>{% endif %}</div></body></html>

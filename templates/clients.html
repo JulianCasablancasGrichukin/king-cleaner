@@ -1,0 +1,9 @@
+{% extends 'catalog.html' %}
+{% from 'macros.html' import heading,empty %}
+{% block catalog_heading %}
+{{heading(title,'Consulta los datos de tus clientes y registra nuevos contactos.')}}
+{% if allowed %}<div class="toolbar"><a class="button" href="#nuevo-registro">+ Nuevo cliente</a></div>{% endif %}
+{% endblock %}
+{% block catalog_empty %}{{empty('Todavía no hay clientes','Los clientes que registres aparecerán aquí.')}}{% endblock %}
+{% block form_title %}Nuevo cliente{% endblock %}
+{% block save_label %}Guardar cliente →{% endblock %}
