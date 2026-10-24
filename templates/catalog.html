@@ -4,11 +4,12 @@
 {% block content %}
 {% block catalog_heading %}
 {{heading(title,'Catálogo de registros reales del negocio.')}}
-<div class="quick-links">{% for path,label in [('categorias','Categorías'),('materiales','Materiales'),('productos','Productos')] %}<a href="{{ url_for('catalog',kind=path) }}">{{label}}</a>{% endfor %}</div>
+<div class="quick-links">{% for path,label in [('categorias','Categorías de insumos'),('materiales','Catálogo de insumos')] %}<a href="{{ url_for('catalog',kind=path) }}">{{label}}</a>{% endfor %}<a href="{{url_for('inventory')}}">Existencias por lote →</a>{% if allowed %}<a href="{{ url_for('receive') }}">Recibir insumos →</a>{% endif %}</div>
 {% endblock %}
 <section class="card">
 {% if data %}<div class="table-wrap"><table><thead><tr>{% for key,label in columns %}<th>{{label}}</th>{% endfor %}</tr></thead><tbody>{% for r in data %}<tr>{% for key,label in columns %}<td>{{r[key] if r[key]!=None else '—'}}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
 {% else %}{% block catalog_empty %}{{empty()}}{% endblock %}{% endif %}
 </section>
+{% block catalog_next %}{% endblock %}
 {% if allowed %}<section class="card form-card" id="nuevo-registro"><h2>{% block form_title %}Añadir registro{% endblock %}</h2><form method="post">{{fields_form(fields)}}<div class="form-actions"><button class="button">{% block save_label %}Guardar registro →{% endblock %}</button></div></form></section>{% endif %}
 {% endblock %}

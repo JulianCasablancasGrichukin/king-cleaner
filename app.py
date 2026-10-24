@@ -211,7 +211,7 @@ def inventory():
     if q:
         sql += ' AND (i.codigo LIKE %s OR i.nombre LIKE %s OR l.numero_lote LIKE %s)'; params += ['%'+q+'%']*3
     data = rows(sql+' ORDER BY l.fecha_vencimiento,l.id', params)
-    return render_template('inventory.html', title='Almacén e inventario', data=data, sector=sector, q=q, state=state)
+    return render_template('inventory.html', title='Insumos y materiales', data=data, sector=sector, q=q, state=state)
 
 
 @app.get('/lotes/<int:lot_id>')
@@ -232,7 +232,7 @@ def receive():
     if request.method=='POST':
         services.receive(text('item'),text('lot',50),text('quantity'),text('entered'),text('expires'),request.form.get('tank','')[:50],g.user['id'],text('token'))
         flash('Lote recibido y movimiento registrado.', 'success'); return redirect(url_for('inventory'))
-    return render_template('form.html', title='Recibir un lote', subtitle='Registra únicamente existencias reales.', fields=[
+    return render_template('form.html', title='Recibir insumos', subtitle='Añade materias primas, líquidos preparados o materiales de empaque al almacén de insumos.', fields=[
         field('item','Material','select',choices('SELECT id,CONCAT(codigo,\' · \',nombre,\' / \',unidad_medida) label FROM items ORDER BY nombre')),
         field('lot','Número de lote'),field('quantity','Cantidad recibida','number',step='0.01'),
         field('entered','Fecha de ingreso','date',value=now().date()),field('expires','Fecha de vencimiento','date'),field('tank','Tanque / ubicación',required=False)])
@@ -252,8 +252,8 @@ def adjustment(lot_id):
 
 CATALOGS = {
  'categorias':('Categorías','categorias',[('nombre','Nombre'),('sector','Sector'),('descripcion','Descripción')]),
- 'materiales':('Materiales','items',[('codigo','Código'),('nombre','Nombre'),('categoria_id','Categoría'),('unidad_medida','Unidad'),('stock_minimo','Stock mínimo')]),
- 'productos':('Productos terminados','productos_terminados',[('codigo','Código'),('nombre','Nombre'),('volumen_contenido_litros','Litros por unidad')]),
+ 'materiales':('Catálogo de insumos','items',[('codigo','Código'),('nombre','Nombre'),('categoria_id','Categoría'),('unidad_medida','Unidad'),('stock_minimo','Stock mínimo')]),
+ 'productos':('Catálogo de productos terminados','productos_terminados',[('codigo','Código'),('nombre','Nombre'),('volumen_contenido_litros','Litros por unidad')]),
  'clientes':('Clientes','clientes',[('nombre','Nombre'),('nit_ci','NIT / CI'),('telefono','Teléfono'),('direccion','Dirección')])}
 
 
@@ -276,7 +276,8 @@ def catalog(kind):
         if kind=='categorias' and values[1] not in ('GRANEL','UNIDADES'): raise ValueError('Sector inválido.')
         with transaction() as c:
             c.execute(f"INSERT INTO {table} ({','.join(x[0] for x in columns)}) VALUES ({','.join(['%s']*len(values))})",values)
-        flash('Cliente guardado.' if kind=='clientes' else 'Registro guardado.', 'success'); return redirect(url_for('catalog',kind=kind))
+        message = {'clientes':'Cliente guardado.', 'productos':'Producto creado. Registra una producción para disponer de unidades para vender.'}
+        flash(message.get(kind,'Registro guardado.'), 'success'); return redirect(url_for('catalog',kind=kind))
     fields=[]
     for name,label in columns:
         f=field(name,label,required=name not in ('descripcion','nit_ci','telefono','direccion'))
@@ -285,7 +286,55 @@ def catalog(kind):
         if name=='categoria_id': f.update(kind='select',options=choices('SELECT id,CONCAT(nombre,\' · \',sector) label FROM categorias'))
         if name in ('stock_minimo','volumen_contenido_litros'): f.update(kind='number',step='0.01' if name=='stock_minimo' else '0.001',value='0' if name=='stock_minimo' else '')
         fields.append(f)
-    return render_template('clients.html' if kind=='clientes' else 'catalog.html',title=title,columns=columns,data=rows(f'SELECT * FROM {table} ORDER BY id DESC'),fields=fields,allowed=allowed)
+    template = {'clientes':'clients.html','productos':'products.html'}.get(kind,'catalog.html')
+    return render_template(template,title=title,columns=columns,data=rows(f'SELECT * FROM {table} ORDER BY id DESC'),fields=fields,allowed=allowed)
+
+
+def production_guide():
+    """Find the first missing prerequisite using production's usable-lot rule."""
+    state = one('''SELECT
+        EXISTS(SELECT 1 FROM productos_terminados) products,
+        EXISTS(SELECT 1 FROM categorias) categories,
+        EXISTS(SELECT 1 FROM items) materials,
+        EXISTS(SELECT 1 FROM lotes_insumo WHERE cantidad_actual>0
+               AND estado='DISPONIBLE' AND fecha_vencimiento>CURDATE()) supplies''')
+    if not state['products']:
+        return dict(stage='product', title='Primero registra tu producto',
+                    body='Crea su ficha con código, nombre y contenido por unidad. Después registra una producción para obtener unidades que puedas vender.',
+                    action='Crear producto', url=url_for('catalog',kind='productos')+'#nuevo-registro')
+    if not state['supplies']:
+        if not state['categories']:
+            return dict(stage='supplies', title='Organiza tus insumos',
+                        body='Crea una categoría para registrar los materiales que utilizarás en producción.',
+                        action='Crear categoría', url=url_for('catalog',kind='categorias'))
+        if not state['materials']:
+            return dict(stage='supplies', title='Registra los materiales de producción',
+                        body='Añade los materiales a su categoría. Luego podrás recibir sus lotes y registrar las cantidades disponibles.',
+                        action='Crear material', url=url_for('catalog',kind='materiales'))
+        return dict(stage='supplies', title='Necesitas insumos disponibles',
+                    body='No hay lotes de insumos disponibles, con saldo y sin vencer. Revisa el almacén o recibe los lotes necesarios para producir.',
+                    action='Recibir insumos', url=url_for('receive'))
+    return dict(stage='production', title='Ya puedes registrar una producción',
+                body='Selecciona el producto, indica las unidades fabricadas y los lotes de insumos realmente utilizados. Al confirmar se crearán las existencias para vender.',
+                action='Registrar producción', url=url_for('production_new'))
+
+
+def sale_guide():
+    guide = production_guide()
+    if guide['stage']!='product':
+        state = one('''SELECT EXISTS(SELECT 1 FROM ordenes_produccion) produced,
+            EXISTS(SELECT 1 FROM kc_stock_terminado) tracked''')
+        preparation = ' '+guide['body'] if guide['stage']=='supplies' else ''
+        if not state['produced']:
+            guide.update(title='Todavía no hay producción registrada',
+                         body='La ficha del producto ya existe. Registra las unidades fabricadas y sus consumos para disponer de existencias para vender.'+preparation)
+        elif state['tracked']:
+            guide.update(title='No quedan unidades disponibles para vender',
+                         body='Las existencias registradas están agotadas. Registra una nueva producción para reponerlas.'+preparation)
+        else:
+            guide.update(title='La producción histórica no tiene saldo registrado',
+                         body='Hay órdenes antiguas sin existencias terminadas registradas. Registra una nueva producción real; las cantidades históricas no se convierten automáticamente en stock.'+preparation)
+    return guide
 
 
 def period():
@@ -319,7 +368,7 @@ def new_sale():
     stock=choices('''SELECT op.id,CONCAT(p.nombre,' · ',op.lote_producto_terminado,' · disponibles: ',s.cantidad_actual) label
         FROM kc_stock_terminado s JOIN ordenes_produccion op ON op.id=s.orden_id
         JOIN productos_terminados p ON p.id=op.producto_terminado_id WHERE s.cantidad_actual>0''')
-    return render_template('operation.html',title='Nueva venta',operation='sale', options=stock,
+    return render_template('operation.html',title='Nueva venta',operation='sale', options=stock,guide=sale_guide() if not stock else None,
         fields=[field('client','Cliente (opcional)','select',choices('SELECT id,nombre label FROM clientes ORDER BY nombre'),required=False)])
 
 
@@ -336,26 +385,55 @@ def sale_detail(sale_id):
 @app.route('/produccion/nueva',methods=['GET','POST'])
 @permission('ALMACEN')
 def production_new():
-    if request.method=='POST':
+    error = None
+    if request.method=='POST' and request.form.get('action')!='edit':
         sources, amounts = request.form.getlist('source'), request.form.getlist('amount')
-        if not (0<len(sources)<=100 and len(sources)==len(amounts)):
-            raise ValueError('Los consumos están incompletos o exceden el límite de 100.')
-        consumed=list(zip(sources, amounts))
-        order_id=services.produce(text('product'),text('lot',50),text('quantity'),consumed,g.user['fullname'],request.form.get('notes',''),g.user['id'],text('token'))
-        flash('Producción registrada y consumos descontados.', 'success'); return redirect(url_for('trace',orden=order_id))
-    options=choices("""SELECT l.id,CONCAT(i.nombre,' · ',l.numero_lote,' · ',l.cantidad_actual,' ',i.unidad_medida) label
+        try:
+            if not (0<len(sources)<=100 and len(sources)==len(amounts)):
+                raise ValueError('Los consumos están incompletos o exceden el límite de 100.')
+            product, lot, quantity, mode = text('product'), text('lot',50), text('quantity'), text('mode')
+            consumed=list(zip(sources, amounts))
+            if request.form.get('action')=='review':
+                review=services.preview_production(product,quantity,consumed,mode)
+                return render_template('production_review.html',title='Revisar producción',review=review,values=request.form)
+            if request.form.get('action','confirm')!='confirm':
+                abort(400)
+            order_id=services.produce(product,lot,quantity,consumed,g.user['fullname'],request.form.get('notes',''),g.user['id'],text('token'),mode=mode)
+            flash('Producción registrada: insumos descontados y unidades terminadas disponibles para vender.', 'success')
+            return redirect(url_for('finished_inventory'))
+        except ValueError as problem:
+            error=str(problem)
+    options=rows("""SELECT l.id,l.numero_lote,l.cantidad_actual,i.nombre,i.unidad_medida
         FROM lotes_insumo l JOIN items i ON i.id=l.item_id WHERE l.cantidad_actual>0 AND l.estado='DISPONIBLE'
         AND l.fecha_vencimiento>CURDATE() ORDER BY l.fecha_vencimiento,l.id""")
-    return render_template('operation.html',title='Registrar producción',operation='production',options=options,fields=[
-        field('product','Producto terminado','select',choices('SELECT id,nombre label FROM productos_terminados')),
-        field('lot','Lote de producto terminado'),field('quantity','Unidades producidas','number',step='1'),field('notes','Observaciones',required=False)])
+    guide=production_guide()
+    source_ids=request.form.getlist('source') or ['']
+    source_amounts=request.form.getlist('amount')
+    source_rows=[(source,source_amounts[index] if index<len(source_amounts) else '') for index,source in enumerate(source_ids[:100])]
+    return render_template('production_form.html',title='Registrar fabricación o envasado',options=options,
+        guide=guide if guide['stage']!='production' else None,products=rows('SELECT * FROM productos_terminados ORDER BY nombre'),
+        values=request.form,source_rows=source_rows,error=error), 400 if error else 200
 
 
 @app.get('/produccion')
 def production():
-    data=rows('''SELECT op.*,p.nombre,s.cantidad_actual FROM ordenes_produccion op JOIN productos_terminados p
-        ON p.id=op.producto_terminado_id LEFT JOIN kc_stock_terminado s ON s.orden_id=op.id ORDER BY op.id DESC''')
-    return render_template('production.html',title='Producción',data=data)
+    data=rows('''SELECT op.*,p.nombre,s.cantidad_actual,d.modalidad FROM ordenes_produccion op JOIN productos_terminados p
+        ON p.id=op.producto_terminado_id LEFT JOIN kc_stock_terminado s ON s.orden_id=op.id
+        LEFT JOIN kc_production_details d ON d.orden_id=op.id ORDER BY op.id DESC''')
+    return render_template('production.html',title='Producción',data=data,guide=production_guide())
+
+
+@app.get('/productos/existencias')
+def finished_inventory():
+    q=request.args.get('q','').strip()
+    data=rows('''SELECT op.id,op.lote_producto_terminado,op.fecha_produccion,p.codigo,p.nombre,
+        p.volumen_contenido_litros,s.cantidad_actual,d.modalidad
+        FROM kc_stock_terminado s JOIN ordenes_produccion op ON op.id=s.orden_id
+        JOIN productos_terminados p ON p.id=op.producto_terminado_id
+        LEFT JOIN kc_production_details d ON d.orden_id=op.id
+        WHERE s.cantidad_actual>0 AND (p.nombre LIKE %s OR p.codigo LIKE %s OR op.lote_producto_terminado LIKE %s)
+        ORDER BY p.nombre,op.fecha_produccion,op.id''',('%'+q+'%',)*3)
+    return render_template('finished_inventory.html',title='Existencias de productos terminados',data=data,q=q)
 
 
 @app.get('/trazabilidad')

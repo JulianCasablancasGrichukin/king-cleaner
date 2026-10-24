@@ -69,38 +69,63 @@ def adjust(lot_id, balance, reason, user, token):
                   (lot_id, delta, reason, user))
 
 
-def produce(product, lot, quantity, consumed, responsible, notes, user, token):
+PRODUCTION_MODES = {'FABRICACION':'Fabricación', 'ENVASADO':'Envasado'}
+
+
+def _production_values(c, product, quantity, consumed, mode, lock=False):
+    if mode not in PRODUCTION_MODES:
+        raise ValueError('Selecciona fabricación o envasado.')
     quantity = number(quantity, whole=True)
-    if not consumed:
-        raise ValueError('Registra al menos un consumo de insumos.')
-    if len({str(x[0]) for x in consumed}) != len(consumed):
+    if not 0 < len(consumed) <= 100:
+        raise ValueError('Registra entre 1 y 100 consumos de insumos.')
+    try:
+        consumed = [(int(source), amount) for source, amount in consumed]
+    except (ValueError, TypeError):
+        raise ValueError('Selecciona lotes de insumo válidos.')
+    if len({source for source, amount in consumed}) != len(consumed):
         raise ValueError('No repitas un lote de insumo; suma su consumo en una fila.')
+    c.execute('SELECT * FROM productos_terminados WHERE id=%s', (product,))
+    target = c.fetchone()
+    if not target:
+        raise ValueError('El producto no existe.')
+    sources = []
+    for lot_id, amount in sorted(consumed):
+        c.execute('''SELECT l.*,i.nombre material,i.unidad_medida FROM lotes_insumo l
+            JOIN items i ON i.id=l.item_id WHERE l.id=%s''' + (' FOR UPDATE' if lock else ''), (lot_id,))
+        source = c.fetchone()
+        if not source or source['estado'] != 'DISPONIBLE' or source['fecha_vencimiento'] <= today():
+            raise ValueError('Un lote seleccionado no está disponible o ya venció.')
+        amount = number(amount, whole=source['unidad_medida'] == 'UNIDADES')
+        if amount > source['cantidad_actual']:
+            raise ValueError('Stock de insumos insuficiente. No se guardó la producción.')
+        sources.append(dict(source, amount=amount, remaining=source['cantidad_actual']-amount))
+    return dict(product=target, quantity=quantity, sources=sources, mode=mode,
+                mode_label=PRODUCTION_MODES[mode])
+
+
+def preview_production(product, quantity, consumed, mode):
+    with transaction() as c:
+        return _production_values(c, product, quantity, consumed, mode)
+
+
+def produce(product, lot, quantity, consumed, responsible, notes, user, token, mode='FABRICACION'):
     with transaction() as c:
         claim(c, token, user)
-        c.execute('SELECT id FROM productos_terminados WHERE id=%s', (product,))
-        if not c.fetchone():
-            raise ValueError('El producto no existe.')
+        values = _production_values(c, product, quantity, consumed, mode, lock=True)
         c.execute('''INSERT INTO ordenes_produccion(lote_producto_terminado,producto_terminado_id,
             cantidad_producida,responsable,observaciones) VALUES(%s,%s,%s,%s,%s)''',
-            (lot, product, quantity, responsible, notes))
+            (lot, product, values['quantity'], responsible, notes))
         order_id = c.lastrowid
-        for lot_id, amount in sorted(consumed, key=lambda x: int(x[0])):
-            c.execute('''SELECT l.*, i.unidad_medida FROM lotes_insumo l JOIN items i ON i.id=l.item_id
-                WHERE l.id=%s FOR UPDATE''', (lot_id,))
-            source = c.fetchone()
-            if not source or source['estado'] != 'DISPONIBLE' or source['fecha_vencimiento'] <= today():
-                raise ValueError('Un lote seleccionado no está disponible o ya venció.')
-            amount = number(amount, whole=source['unidad_medida'] == 'UNIDADES')
-            if amount > source['cantidad_actual']:
-                raise ValueError('Stock de insumos insuficiente. No se guardó la producción.')
-            remaining = source['cantidad_actual'] - amount
+        c.execute('INSERT INTO kc_production_details(orden_id,modalidad) VALUES(%s,%s)', (order_id,mode))
+        for source in values['sources']:
+            lot_id, amount, remaining = source['id'], source['amount'], source['remaining']
             c.execute('UPDATE lotes_insumo SET cantidad_actual=%s,estado=%s WHERE id=%s',
                       (remaining, 'AGOTADO' if remaining == 0 else 'DISPONIBLE', lot_id))
             c.execute('INSERT INTO trazabilidad_produccion(orden_produccion_id,lote_insumo_id,cantidad_descontada) VALUES(%s,%s,%s)',
                       (order_id, lot_id, amount))
             c.execute('INSERT INTO kc_movimientos(lote_id,delta,motivo,usuario_id) VALUES(%s,%s,%s,%s)',
                       (lot_id, -amount, 'Producción ' + lot, user))
-        c.execute('INSERT INTO kc_stock_terminado(orden_id,cantidad_actual) VALUES(%s,%s)', (order_id, quantity))
+        c.execute('INSERT INTO kc_stock_terminado(orden_id,cantidad_actual) VALUES(%s,%s)', (order_id, values['quantity']))
         return order_id
 
 

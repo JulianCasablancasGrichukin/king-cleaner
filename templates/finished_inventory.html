@@ -1,0 +1,11 @@
+{% extends 'base.html' %}
+{% from 'macros.html' import heading,empty %}
+{% block content %}
+{{heading(title,'Unidades listas para vender, separadas de los insumos que utilizas para producir.')}}
+<div class="toolbar"><a href="{{url_for('catalog',kind='productos')}}">Catálogo de productos →</a>{% if user.role!='ALMACEN' and data %}<a class="button" href="{{url_for('new_sale')}}">+ Registrar venta</a>{% endif %}</div>
+<section class="card"><form class="filters"><label>Buscar producto o lote<input name="q" value="{{q}}" placeholder="Nombre, código o lote terminado"></label><button class="button outline">Buscar</button>{% if q %}<a href="{{url_for('finished_inventory')}}">Limpiar</a>{% endif %}</form>
+{% if data %}<div class="table-wrap"><table><thead><tr><th>Producto / presentación</th><th>Lote terminado</th><th>Origen</th><th>Disponibles</th><th>Fecha de producción</th></tr></thead><tbody>{% for r in data %}<tr><td>{{r.nombre}}<small>{{r.codigo}} · {{r.volumen_contenido_litros}} L por unidad</small></td><td><a href="{{url_for('trace',orden=r.id)}}">{{r.lote_producto_terminado}} →</a></td><td>{{'Fabricación' if r.modalidad=='FABRICACION' else 'Envasado' if r.modalidad=='ENVASADO' else 'Modalidad no registrada'}}</td><td><strong>{{r.cantidad_actual}}</strong> unidades</td><td>{{r.fecha_produccion}}</td></tr>{% endfor %}</tbody></table></div>
+{% elif q %}{{empty('Sin coincidencias','Prueba otro nombre, código o número de lote.')}}
+{% else %}{{empty('No hay unidades disponibles','Crear una ficha de producto no genera existencias. Las unidades se añaden al registrar fabricación o envasado.')}}<div class="empty-actions"><a class="button outline" href="{{url_for('production')}}">{{'Consultar producción' if user.role=='VENTAS' else 'Preparar producción'}} →</a></div>{% endif %}
+</section><p class="muted">Solo se muestran lotes con saldo registrado y positivo. Las órdenes históricas sin saldo se consultan en el historial de producción.</p>
+{% endblock %}

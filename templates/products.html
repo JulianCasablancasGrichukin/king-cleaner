@@ -1,0 +1,16 @@
+{% extends 'catalog.html' %}
+{% from 'macros.html' import heading,empty %}
+{% block catalog_heading %}
+{{heading('Catálogo de productos terminados','Define las presentaciones que vendes. Las existencias se generan al registrar fabricación o envasado.')}}
+<div class="toolbar">
+{% if allowed %}<a class="button" href="#nuevo-registro">+ Nuevo producto</a>{% endif %}
+<a href="{{ url_for('finished_inventory') }}">Ver existencias disponibles →</a>
+</div>
+<div class="notice">Crear la ficha de un producto no añade unidades al inventario. Por ejemplo, para un envase de 500 ml indica 0,500 litros por unidad.</div>
+{% endblock %}
+{% block catalog_empty %}{{empty('Todavía no hay productos','Registra el primer producto con su código, nombre y contenido por unidad.')}}{% endblock %}
+{% block form_title %}Nuevo producto{% endblock %}
+{% block save_label %}Guardar producto →{% endblock %}
+{% block catalog_next %}
+{% if data and allowed %}<section class="card workflow-next"><div><h2>Siguiente paso: registrar producción</h2><p>La ficha ya está creada. Prepara los insumos y registra las unidades fabricadas para poder venderlas.</p></div><a class="button" href="{{ url_for('production') }}">Preparar producción →</a></section>{% endif %}
+{% endblock %}

@@ -6,3 +6,20 @@
 .sidebar nav .nav-caption:first-child{margin-top:28px}
 .sidebar nav>a{padding-top:9px;padding-bottom:9px;margin-bottom:3px}
 @media(max-width:700px){.sidebar nav>a{padding:8px;margin:0;flex-shrink:0}.sidebar nav .nav-caption{display:none}}
+
+/* Product-to-sale guidance. */
+.workflow-steps{list-style:none;padding:0;margin:0 0 24px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.workflow-steps li{display:flex;gap:12px;align-items:center;border-bottom:2px solid #e6edf0;padding:0 0 17px;color:#637e8c}
+.workflow-steps li>span{display:grid;place-items:center;flex-shrink:0;width:32px;height:32px;background:#eff4f6;border-radius:50%;font-weight:700}
+.workflow-steps strong{display:block;font-size:13px}.workflow-steps small{display:block;margin-top:3px;color:#78909e}
+.workflow-steps .current{border-color:#117b99;color:#116a84}.workflow-steps .current>span{background:#117b99;color:white}
+.workflow-next{display:flex;align-items:center;justify-content:space-between;gap:24px}.workflow-next>div{max-width:740px}.workflow-next p:last-child{margin-bottom:0}.workflow-next .button{flex-shrink:0}
+.workflow-role{background:#f1f6f8;padding:12px 15px;border-radius:7px;font-size:12px}
+.subnav a[aria-current="page"]{color:#fff;font-weight:650;background:#164861}
+@media(max-width:950px){.workflow-next{align-items:flex-start;flex-direction:column}}
+@media(max-width:700px){.workflow-steps{grid-template-columns:1fr;gap:12px}.workflow-steps li{padding-bottom:12px}.workflow-next .button{white-space:normal}}
+
+[hidden]{display:none!important}
+.wizard-progress{margin-bottom:24px}.production-help{margin-top:22px;margin-bottom:0}
+.production-line .source-info{display:block;margin-top:7px;font-weight:400}.production-line label:first-child{flex:3}.production-line label:nth-child(2){flex:1}
+.production-line{align-items:flex-start}.production-line .remove-line{margin-top:25px}

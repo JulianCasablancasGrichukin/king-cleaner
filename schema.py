@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS kc_movimientos (
 CREATE TABLE IF NOT EXISTS kc_stock_terminado (
  orden_id INT PRIMARY KEY, cantidad_actual INT NOT NULL,
  FOREIGN KEY(orden_id) REFERENCES ordenes_produccion(id) ON DELETE RESTRICT);
+CREATE TABLE IF NOT EXISTS kc_production_details (
+ orden_id INT PRIMARY KEY,
+ modalidad ENUM('FABRICACION','ENVASADO') NOT NULL,
+ FOREIGN KEY(orden_id) REFERENCES ordenes_produccion(id) ON DELETE RESTRICT);
 CREATE TABLE IF NOT EXISTS kc_asignaciones_venta (
  id INT AUTO_INCREMENT PRIMARY KEY, detalle_id INT NOT NULL, orden_id INT NOT NULL,
  cantidad INT NOT NULL, FOREIGN KEY(detalle_id) REFERENCES detalle_ventas(id) ON DELETE RESTRICT,
@@ -57,3 +61,4 @@ def install(new=False):
             if statement.strip():
                 c.execute(statement)
         c.execute('INSERT IGNORE INTO kc_migrations(version) VALUES (1)')
+        c.execute('INSERT IGNORE INTO kc_migrations(version) VALUES (2)')

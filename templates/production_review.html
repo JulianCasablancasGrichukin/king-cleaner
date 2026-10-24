@@ -1,0 +1,11 @@
+{% extends 'base.html' %}
+{% from 'macros.html' import heading %}
+{% block content %}
+{{heading(title,'Comprueba el resultado y los consumos antes de actualizar las existencias.')}}
+<ol class="workflow-steps"><li><span>1</span><strong>Qué obtuviste</strong></li><li><span>2</span><strong>Qué utilizaste</strong></li><li class="current" aria-current="step"><span>3</span><strong>Revisar y confirmar</strong></li></ol>
+<section class="card"><p class="eyebrow">SE AÑADIRÁ A PRODUCTOS TERMINADOS</p><h2>{{review.quantity|int}} unidades de {{review.product.nombre}}</h2><div class="detail-grid"><div><small>Operación</small><h3>{{review.mode_label}}</h3></div><div><small>Lote terminado</small><h3>{{values.get('lot')}}</h3></div><div><small>Presentación</small><h3>{{review.product.volumen_contenido_litros}} L por unidad</h3></div></div><p>Observaciones: {{values.get('notes') or 'Sin observaciones'}}</p></section>
+<section class="card"><p class="eyebrow">SE DESCONTARÁ DEL ALMACÉN DE INSUMOS</p><h2>Consumos de esta operación</h2><div class="table-wrap"><table><thead><tr><th>Insumo</th><th>Lote</th><th>Disponible ahora</th><th>Se descontará</th><th>Saldo previsto</th></tr></thead><tbody>{% for source in review.sources %}<tr><td>{{source.material}}</td><td>{{source.numero_lote}}</td><td>{{source.cantidad_actual}} {{source.unidad_medida}}</td><td><strong>{{source.amount}} {{source.unidad_medida}}</strong></td><td>{{source.remaining}} {{source.unidad_medida}}</td></tr>{% endfor %}</tbody></table></div></section>
+<div class="notice">Todavía no se han guardado cambios. Al confirmar se volverán a comprobar los saldos y se registrará toda la operación junta. Los consumos son manuales; este resumen no valida una receta ni su rendimiento.</div>
+<form method="post"><input type="hidden" name="csrf" value="{{csrf}}">{% for name in ['token','product','lot','quantity','mode','notes'] %}<input type="hidden" name="{{name}}" value="{{values.get(name,'')}}">{% endfor %}{% for source in review.sources %}<input type="hidden" name="source" value="{{source.id}}"><input type="hidden" name="amount" value="{{source.amount}}">{% endfor %}
+<div class="form-actions"><button class="button outline" name="action" value="edit">← Corregir datos</button><button class="button" name="action" value="confirm">Confirmar producción →</button></div></form>
+{% endblock %}

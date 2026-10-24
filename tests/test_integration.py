@@ -38,7 +38,7 @@ def clear_test_data(database):
     from db import transaction
     assert os.environ['DB_NAME']==database and database.startswith('king_cleaner_test_')
     with transaction() as c:
-        for table in ['kc_asignaciones_venta','detalle_ventas','ventas','kc_stock_terminado','trazabilidad_produccion','ordenes_produccion','kc_movimientos','lotes_insumo','items','categorias','productos_terminados','clientes','kc_events','kc_requests','kc_users']:
+        for table in ['kc_asignaciones_venta','detalle_ventas','ventas','kc_production_details','kc_stock_terminado','trazabilidad_produccion','ordenes_produccion','kc_movimientos','lotes_insumo','items','categorias','productos_terminados','clientes','kc_events','kc_requests','kc_users']:
             c.execute(f'DELETE FROM {table}')
 
 
@@ -82,10 +82,151 @@ def production(stock,qty=10,amount=10):
 
 
 def test_empty_database_routes(client):
-    routes=['/','/inventario','/inventario?sector=UNIDADES','/ventas','/ventas?modo=mensual','/ventas?modo=anual','/ventas/nueva','/produccion','/produccion/nueva','/trazabilidad','/alertas','/calendario','/calendario/nuevo','/recepcion','/catalogos/categorias','/catalogos/materiales','/catalogos/productos','/catalogos/clientes','/configuracion','/reportes','/reportes/ventas.csv']
+    routes=['/','/inventario','/inventario?sector=UNIDADES','/ventas','/ventas?modo=mensual','/ventas?modo=anual','/ventas/nueva','/productos/existencias','/produccion','/produccion/nueva','/trazabilidad','/alertas','/calendario','/calendario/nuevo','/recepcion','/catalogos/categorias','/catalogos/materiales','/catalogos/productos','/catalogos/clientes','/configuracion','/reportes','/reportes/ventas.csv']
     for route in routes:
         result=client.get(route)
         assert result.status_code==200,(route,result.data.decode())
+
+
+@pytest.mark.parametrize('role', ['ADMIN', 'ALMACEN', 'VENTAS'])
+def test_product_workflow_permissions(client, role):
+    from db import transaction
+    with transaction() as c:
+        c.execute('UPDATE kc_users SET role=%s WHERE id=%s', (role, client.test_user))
+    products = client.get('/catalogos/productos').data.decode()
+    assert ('Guardar producto' in products) == (role != 'VENTAS')
+    assert 'class="quick-links"' not in products
+    page = client.get('/produccion').data.decode()
+    assert 'Primero registra tu producto' in page
+    assert ('href="/catalogos/productos#nuevo-registro"' in page) == (role != 'VENTAS')
+    if role == 'VENTAS':
+        assert 'Solicita a Almacén' in page
+        assert client.post('/catalogos/productos', data={'csrf':'test-csrf'}).status_code == 403
+        assert client.get('/produccion/nueva').status_code == 403
+    else:
+        assert 'Confirmar producción' not in client.get('/produccion/nueva').data.decode()
+    if role != 'ALMACEN':
+        sale = client.get('/ventas/nueva').data.decode()
+        assert 'Primero registra tu producto' in sale
+        assert 'Confirmar venta' not in sale
+
+
+def test_product_creation_does_not_create_stock_and_guides_preparation(client):
+    from db import one
+    result = client.post('/catalogos/productos', data=dict(csrf='test-csrf',
+        codigo='TEST-P', nombre='TEST producto', volumen_contenido_litros='0.5'), follow_redirects=True)
+    assert result.status_code == 200
+    assert 'Producto creado.' in result.data.decode()
+    assert one('SELECT COUNT(*) n FROM kc_stock_terminado')['n'] == 0
+    assert 'Crear categoría' in client.get('/produccion/nueva').data.decode()
+    client.post('/catalogos/categorias', data=dict(csrf='test-csrf', nombre='TEST categoría', sector='GRANEL', descripcion=''))
+    assert 'Crear material' in client.get('/produccion/nueva').data.decode()
+    category = one('SELECT id FROM categorias')['id']
+    client.post('/catalogos/materiales', data=dict(csrf='test-csrf', codigo='TEST-M',
+        nombre='TEST material', categoria_id=category, unidad_medida='LITROS', stock_minimo='0'))
+    blocked = client.get('/produccion/nueva').data.decode()
+    assert 'Recibir insumos' in blocked
+    assert 'Confirmar producción' not in blocked
+    assert 'Todavía no hay producción registrada' in client.get('/ventas/nueva').data.decode()
+
+
+def test_usable_supplies_unlock_production_and_empty_sale_explains_next_step(stock, client):
+    assert 'Revisar producción' in client.get('/produccion/nueva').data.decode()
+    sale = client.get('/ventas/nueva').data.decode()
+    assert 'Todavía no hay producción registrada' in sale
+    assert 'href="/produccion/nueva"' in sale
+    from db import transaction
+    with transaction() as c:
+        c.execute('UPDATE lotes_insumo SET fecha_vencimiento=CURDATE()')
+    assert 'Recibir insumos' in client.get('/produccion/nueva').data.decode()
+
+
+def test_exhausted_sale_explains_stock_even_without_remaining_supplies(stock, client):
+    from services import sell
+    order = production(stock, qty=1, amount=100)
+    sell(None, [(order, 1, '5.00')], 'tester', stock['user'], secrets.token_hex(32))
+    sale = client.get('/ventas/nueva').data.decode()
+    assert 'No quedan unidades disponibles para vender' in sale
+    assert 'Recibir insumos' in sale
+    assert 'Confirmar venta' not in sale
+
+
+def test_historical_production_is_not_presented_as_exhausted(stock, client):
+    from db import transaction
+    order = production(stock)
+    with transaction() as c:
+        c.execute('DELETE FROM kc_stock_terminado WHERE orden_id=%s', (order,))
+    sale = client.get('/ventas/nueva').data.decode()
+    assert 'La producción histórica no tiene saldo registrado' in sale
+
+
+@pytest.mark.parametrize('mode', ['FABRICACION', 'ENVASADO'])
+def test_production_review_is_read_only_and_confirmation_records_mode(stock, client, mode):
+    from db import one
+    data=dict(csrf='test-csrf',token=secrets.token_hex(32),product=stock['product'],
+              lot='TEST-REVIEW',quantity=2,source=str(stock['lot']),amount='1.00',mode=mode,notes='TEST revisión')
+    response=client.post('/produccion/nueva',data=dict(data,action='review'))
+    assert response.status_code==200
+    assert 'Saldo previsto' in response.data.decode()
+    assert one('SELECT COUNT(*) n FROM ordenes_produccion')['n']==0
+    assert one('SELECT COUNT(*) n FROM kc_requests')['n']==1  # Only the fixture's receipt.
+    assert one('SELECT cantidad_actual FROM lotes_insumo')['cantidad_actual']==Decimal('100')
+    edit=client.post('/produccion/nueva',data=dict(data,action='edit'))
+    assert edit.status_code==200
+    assert 'value="TEST-REVIEW"' in edit.data.decode()
+    saved=client.post('/produccion/nueva',data=dict(data,action='confirm'))
+    assert saved.status_code==302 and saved.location.endswith('/productos/existencias')
+    assert one('SELECT modalidad FROM kc_production_details')['modalidad']==mode
+    assert one('SELECT cantidad_actual FROM kc_stock_terminado')['cantidad_actual']==2
+    assert one('SELECT cantidad_actual FROM lotes_insumo')['cantidad_actual']==Decimal('99')
+    assert 'TEST-REVIEW' in client.get('/productos/existencias').data.decode()
+    assert client.post('/produccion/nueva',data=dict(data,action='confirm')).status_code==409
+    assert one('SELECT cantidad_actual FROM kc_stock_terminado')['cantidad_actual']==2
+
+
+def test_production_confirmation_rechecks_stock_after_review(stock, client):
+    from db import one
+    from services import adjust
+    data=dict(csrf='test-csrf',token=secrets.token_hex(32),product=stock['product'],
+              lot='TEST-STALE',quantity=5,source=str(stock['lot']),amount='10',mode='ENVASADO')
+    assert client.post('/produccion/nueva',data=dict(data,action='review')).status_code==200
+    adjust(stock['lot'], '1', 'TEST cambio concurrente', stock['user'], secrets.token_hex(32))
+    response=client.post('/produccion/nueva',data=dict(data,action='confirm'))
+    assert response.status_code==400
+    assert 'Stock de insumos insuficiente' in response.data.decode()
+    assert 'value="TEST-STALE"' in response.data.decode()
+    assert one('SELECT COUNT(*) n FROM ordenes_produccion')['n']==0
+    assert one('SELECT COUNT(*) n FROM kc_production_details')['n']==0
+
+
+def test_production_review_checks_units_and_duplicates(stock, client):
+    from db import transaction,one
+    from services import receive,today
+    with transaction() as c:
+        c.execute("INSERT INTO categorias(nombre,sector) VALUES('TEST empaques','UNIDADES')")
+        category=c.lastrowid
+        c.execute("INSERT INTO items(codigo,nombre,categoria_id,unidad_medida) VALUES('TEST-ENV','TEST envase',%s,'UNIDADES')",(category,))
+        item=c.lastrowid
+    receive(item,'TEST-ENVASES',10,str(today()),str(today()+timedelta(days=60)),'',stock['user'],secrets.token_hex(32))
+    lot=one('SELECT id FROM lotes_insumo WHERE item_id=%s',(item,))['id']
+    data=dict(csrf='test-csrf',token=secrets.token_hex(32),product=stock['product'],lot='TEST-INVALID',quantity=1,mode='ENVASADO',action='review')
+    assert client.post('/produccion/nueva',data=dict(data,source=str(lot),amount='0.5')).status_code==400
+    assert client.post('/produccion/nueva',data=dict(data,source=[str(lot),'0'+str(lot)],amount=['1','1'])).status_code==400
+    assert client.post('/produccion/nueva',data=dict(data,source=str(lot),amount='1',mode='INVALID')).status_code==400
+    assert one('SELECT COUNT(*) n FROM ordenes_produccion')['n']==0
+
+
+def test_finished_inventory_reflects_sales_and_preserves_historical_records(stock,client):
+    from db import transaction
+    from services import sell
+    order=production(stock,qty=3,amount=2)
+    with transaction() as c:
+        c.execute('DELETE FROM kc_production_details WHERE orden_id=%s',(order,))
+    assert 'Modalidad no registrada' in client.get('/productos/existencias').data.decode()
+    assert 'Modalidad no registrada' in client.get('/produccion').data.decode()
+    sell(None,[(order,3,'2.00')],'tester',stock['user'],secrets.token_hex(32))
+    assert 'No hay unidades disponibles' in client.get('/productos/existencias').data.decode()
+    assert 'Sin coincidencias' in client.get('/productos/existencias?q=missing').data.decode()
 
 
 def test_full_production_sale_trace(stock,client):
@@ -248,7 +389,7 @@ def test_web_forms_complete_cycle(client):
     product=one('SELECT id FROM productos_terminados')['id']
     assert post('/recepcion',item=item,lot='TEST-REC',quantity=50,entered=str(today()),expires=str(today()+timedelta(days=90)),tank='').status_code==302
     lot=one('SELECT id FROM lotes_insumo')['id']
-    assert post('/produccion/nueva',product=product,lot='TEST-FINAL',quantity=10,source=str(lot),amount='1.25',notes='').status_code==302
+    assert post('/produccion/nueva',product=product,lot='TEST-FINAL',quantity=10,source=str(lot),amount='1.25',notes='',mode='FABRICACION').status_code==302
     order=one('SELECT id FROM ordenes_produccion')['id']
     assert post('/ventas/nueva',client='',order=str(order),quantity='2',price='5.20').status_code==302
     assert one('SELECT total_venta FROM ventas')['total_venta']==Decimal('10.40')

@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% from 'macros.html' import heading %}
+{% block content %}
+{{heading(title,'Registra una operación ya realizada. Tú indicas los consumos reales; el sistema actualiza las existencias.')}}
+{% if error %}<div class="notice error" role="alert">{{error}} Tus datos siguen en el formulario.</div>{% endif %}
+{% if guide and not error %}{% include 'workflow_guide.html' %}
+{% else %}
+<form method="post" id="production-wizard" data-start-step="{{2 if values else 1}}">
+<input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="token" value="{{values.get('token') or token}}">
+<ol class="workflow-steps wizard-progress" aria-label="Pasos de producción"><li data-progress="1"><span>1</span><strong>Qué obtuviste</strong></li><li data-progress="2"><span>2</span><strong>Qué utilizaste</strong></li><li><span>3</span><strong>Revisar y confirmar</strong></li></ol>
+<section class="card" data-step="1"><h2>1. Qué obtuviste</h2>
+<p>En ambos casos el resultado son unidades envasadas listas para vender.</p>
+<div class="form-grid">
+<label>Tipo de operación <span class="required">*</span><select name="mode" required><option value="">Selecciona una opción</option><option value="FABRICACION" {{'selected' if values.get('mode')=='FABRICACION'}}>Fabricación: elaborar y obtener unidades terminadas</option><option value="ENVASADO" {{'selected' if values.get('mode')=='ENVASADO'}}>Envasado: utilizar un líquido ya preparado</option></select></label>
+<label>Producto terminado <span class="required">*</span><select name="product" required><option value="">Selecciona el producto que obtuviste</option>{% for p in products %}<option value="{{p.id}}" {{'selected' if values.get('product')==p.id|string}}>{{p.nombre}} · {{p.volumen_contenido_litros}} L por unidad</option>{% endfor %}</select></label>
+<label>Lote terminado <span class="required">*</span><input name="lot" value="{{values.get('lot','')}}" maxlength="50" required></label>
+<label>Unidades obtenidas <span class="required">*</span><input type="number" name="quantity" value="{{values.get('quantity','')}}" min="1" step="1" required></label>
+<label>Observaciones<input name="notes" value="{{values.get('notes','')}}" maxlength="1000"></label>
+</div>
+<div class="notice production-help">Fabricación: registra las materias primas y los empaques realmente utilizados. Envasado: registra el líquido preparado y los empaques utilizados. Si elaboras un líquido a granel para envasarlo otro día, ese paso intermedio aún no se registra como producto terminado.</div>
+<div class="form-actions"><button type="button" class="button" data-next-step hidden>Continuar: insumos utilizados →</button></div>
+</section>
+<section class="card" data-step="2"><h2>2. Qué utilizaste</h2><p>Selecciona cada lote y la cantidad consumida, en su unidad de medida. No se aplican recetas ni conversiones automáticas.</p>
+<div id="operation-lines">{% for selected,amount in source_rows %}<div class="operation-line production-line"><label>Insumo / lote<select name="source" required><option value="">Selecciona un lote de insumo</option>{% for source in options %}<option value="{{source.id}}" data-unit="{{source.unidad_medida}}" data-available="{{source.cantidad_actual}}" {{'selected' if selected==source.id|string}}>{{source.nombre}} · {{source.numero_lote}} · {{source.cantidad_actual}} {{source.unidad_medida}} disponibles</option>{% endfor %}</select><small class="source-info muted" aria-live="polite"></small></label><label>Cantidad utilizada <span class="source-unit"></span><input name="amount" type="number" step="0.01" min="0.01" value="{{amount}}" required></label><button type="button" class="remove-line" aria-label="Quitar insumo">×</button></div>{% endfor %}</div>
+<button type="button" id="add-line" class="button outline">+ Añadir insumo</button>
+<div class="form-actions"><button type="button" class="button outline" data-prev-step hidden>← Volver al producto</button><button class="button" name="action" value="review">Revisar producción →</button></div>
+</section>
+</form>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,10 @@
+<section class="card workflow-guide" aria-label="Pasos para disponer de productos para vender">
+<ol class="workflow-steps">
+<li class="{{ 'current' if guide.stage=='product' else '' }}"><span>1</span><div><strong>Crear producto</strong><small>Define qué vas a vender.</small></div></li>
+<li class="{{ 'current' if guide.stage in ('supplies','production') else '' }}"><span>2</span><div><strong>Registrar producción</strong><small>Usa insumos y genera existencias.</small></div></li>
+<li><span>3</span><div><strong>Registrar venta</strong><small>Vende las unidades disponibles.</small></div></li>
+</ol>
+<div class="workflow-next"><div><p class="eyebrow">SIGUIENTE PASO</p><h2>{{guide.title}}</h2><p>{{guide.body}}</p>
+{% if user.role=='VENTAS' %}<p class="workflow-role">Solicita a Almacén o a un administrador que prepare los productos y registre las existencias. Tu rol permite consultar esta información y registrar ventas.</p>{% endif %}
+</div>{% if user.role!='VENTAS' %}<a class="button" href="{{guide.url}}">{{guide.action}} →</a>{% endif %}</div>
+</section>
